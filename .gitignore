@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+*.o
+*.d
+vsh
+vsh_debug
+vsh_test
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Debug
+core
+vgcore.*
+*.dSYM/
+
+# OS
+.DS_Store
+Thumbs.db
