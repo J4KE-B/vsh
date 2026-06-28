@@ -18,6 +18,7 @@
 #include "executor.h"
 #include "vsh_readline.h"
 #include "safe_string.h"
+#include "audit.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,6 +137,9 @@ void shell_destroy(Shell *shell) {
         /* Restore original terminal attributes */
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &shell->orig_termios);
     }
+
+    /* Close the tamper-evident audit log (restricted mode) */
+    if (shell->audit) audit_close(shell->audit);
 
     /* Subsystem destruction */
     if (shell->parse_arena)  arena_destroy(shell->parse_arena);
@@ -268,6 +272,14 @@ int shell_exec_line(Shell *shell, const char *line) {
 
     /* ---- Execute -------------------------------------------------------- */
     shell->last_status = executor_execute(shell, ast);
+
+    /* ---- Audit ---------------------------------------------------------- *
+     * Record the executed line (and its exit status) as a tamper-evident
+     * hash-chain entry.  Restricted-mode denials return non-zero and are
+     * logged here too, so the record of attempted escapes is preserved. */
+    if (shell->audit)
+        audit_record(shell->audit, getuid(), line, shell->last_status);
+
     return shell->last_status;
 }
 

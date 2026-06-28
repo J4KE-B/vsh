@@ -42,5 +42,7 @@ void test_safe_string(void);
 void test_lexer(void);
 void test_parser(void);
 void test_sha256(void);
+void test_restricted(void);
+void test_audit(void);
 
 #endif /* VSH_TEST_H */

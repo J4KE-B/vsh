@@ -19,6 +19,8 @@ int main(void) {
     test_lexer();
     test_parser();
     test_sha256();
+    test_restricted();
+    test_audit();
 
     printf("\n=== Results: %d/%d passed", tests_passed, tests_run);
     if (tests_failed > 0) {
