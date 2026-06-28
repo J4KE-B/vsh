@@ -18,6 +18,7 @@ int main(void) {
     test_safe_string();
     test_lexer();
     test_parser();
+    test_sha256();
 
     printf("\n=== Results: %d/%d passed", tests_passed, tests_run);
     if (tests_failed > 0) {
