@@ -19,8 +19,8 @@ SRCS     := $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/builtins/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS     := $(OBJS:.o=.d)
 
-# Test files
-TEST_SRCS := $(wildcard tests/*.c)
+# Test files (the fuzz harness is built separately via `make fuzz`)
+TEST_SRCS := $(filter-out tests/fuzz_parser.c,$(wildcard tests/*.c))
 TEST_OBJS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%.o,$(TEST_SRCS))
 # Objects excluding main.o for test linking
 LIB_OBJS  := $(filter-out $(BUILD_DIR)/main.o,$(OBJS))
