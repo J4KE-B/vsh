@@ -70,9 +70,12 @@ A denied command prints `vsh: restricted: <cmd>: <reason>` and returns 126.
 
 ### Tamper-evident audit log (`src/audit.c`, `include/audit.h`)
 
-Every executed line is recorded exactly once at the single choke point in
-`shell_exec_line()` (`src/shell.c:281`), so the log captures both successful
-commands and blocked attempts (blocked ones carry result 126).
+Every line executed **through the interactive REPL once restricted mode has engaged** is recorded
+at the single choke point in `shell_exec_line()` (`src/shell.c:281`), so the log captures both
+successful commands and blocked attempts (blocked ones carry result 126). Be precise about the scope
+(a security review tightened this): logging happens *after* the command runs, so a shell-fatal path
+(`exit`) records nothing, and `~/.vshrc` is deliberately **not** sourced in restricted mode at all
+(see the startup-escape note below), so there is no pre-audit code path to miss.
 
 **Hash chain.** Each entry's hash commits to the previous entry's hash
 (`hash_entry()`, `src/audit.c:29`):
@@ -99,8 +102,11 @@ times in a row produces one continuous 3-entry verifiable chain.
 **Measured behaviour** (real runs):
 - 5 commands logged → `--verify-audit` → "audit log intact: 5 entries verified".
 - Edit any past entry's command → "audit log **TAMPERED** at entry N" (the edited line).
-- Startup refuses to run if the audit log can't be opened — an unauditable
-  sandbox is not a sandbox (`src/main.c:113`).
+- Startup refuses to run if the audit log can't be opened, **or if the target is not a regular
+  file** — so `VSH_AUDIT_LOG=/dev/null` is rejected rather than silently discarding every record
+  (`src/audit.c`, `audit_open`). An unauditable sandbox is not a sandbox.
+- The log is created `0600` with `O_NOFOLLOW` (`src/audit.c`, `audit_record`), so the plaintext
+  command log is not world-readable and a pre-planted symlink at the path is not followed.
 
 Tested directly in `tests/test_audit.c`: record/verify, head+count recovery on
 reopen, single-byte tamper detected at the right line, malformed-line
@@ -232,13 +238,42 @@ root, against an attacker who can replace the `vsh` binary, or against someone
 who reconstructs the whole chain — those need OS-level controls and an
 off-box-anchored head.
 
+**Q: Walk me through startup — when does the restriction turn on relative to your rc file?**
+This is the sharpest question, and there's a real bug-and-fix story to tell. Originally `~/.vshrc`
+was sourced inside `shell_init()` *before* `main()` set the restricted flag, so a confined user who
+controls their home directory could put arbitrary commands in `~/.vshrc` and have them run
+**unrestricted and unaudited** at startup — the classic rbash rc-file escape. The fix: `shell_init()`
+now detects `-r`/`--restricted` from `argv` up front and **skips user rc entirely in restricted
+mode** (`src/shell.c`). Verified with a pty harness: rc still runs in normal interactive mode, and is
+skipped under `-r`. (Precondition worth stating honestly: from inside a pristine vsh session the user
+can't create `~/.vshrc` — redirection is blocked — so the original escape needed an out-of-band write
+to the home dir, e.g. sftp or a shared home; that's normal for jump-host/kiosk setups, which is why
+it mattered.)
+
 **Q: Is restricted-mode enforcement actually complete?**
-It covers simple commands and every pipeline stage. Known gaps I'd disclose:
-command substitution and functions defined in an rc file could widen the
-allow-listed surface, and the allow-list is compile-time (a real deployment
-would load it from a root-owned config). The structural blocks (no `/`, no
-output redir, no PATH/ENV writes) are the load-bearing part and match rbash's
-model.
+It covers simple commands and every pipeline stage, and it's an allow-list (deny-by-default), which
+is the right shape. Command substitution `$(...)`/backticks aren't implemented in the lexer, so that
+escape class doesn't exist here; `source`, `export`, `alias`, `watch` (uses `popen`) are all off the
+allow-list. Honest remaining gaps I'd disclose rather than let an interviewer find:
+- **Command resolution uses the inherited `PATH`.** Safety rests on the operator not launching
+  `vsh -r` with a user-writable directory (`.`, `~/bin`) in `PATH` — otherwise a user could plant a
+  file named after an allow-listed command. A production deployment would pin `PATH` to root-owned dirs.
+- **Allow-listed readers (`cat`, `grep`, `head`, `tail`, `sort`) take arbitrary arguments**, so a
+  confined user can read any file their uid can read (`cat /etc/passwd`). Acceptable for a read-only
+  kiosk, but it's a *read* capability I'd name up front, not hide.
+- **The allow-list is compile-time**; a real deployment would load it from a root-owned config.
+- The structural blocks (no `/`, no output redir, no PATH/SHELL/ENV/LD_* writes — now including bare
+  assignment lines) are the load-bearing part.
+
+**Q: What does `audit_open` validate, and what happens with two concurrent sessions?**
+Two honest weaknesses. (1) `audit_open` recovers the head hash from the last line but does **not**
+re-verify the chain on open — so after a tail-truncation it will happily chain new, self-consistent
+entries onto a forged head (`--verify-audit` still catches an *edit*, but not this). (2) There's no
+file locking: two `vsh -r` sessions writing the same log keep independent in-memory heads, so their
+appends interleave into a chain whose links don't line up and `--verify-audit` reports a false
+`TAMPERED`. Fixes are a single-writer/advisory-lock design and verifying the chain on open. Also: the
+command field is truncated to 4 KB before hashing, so a >4 KB command runs in full but is logged
+(and hashed) truncated.
 
 **Q: Why SHA-256 specifically, and is your implementation constant-time?**
 SHA-256 is a standard, widely-reviewed collision-resistant hash — the right
