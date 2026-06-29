@@ -19,6 +19,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 /* The genesis "previous hash" is 64 zero hex digits. */
 static const char GENESIS_HEX[SHA256_HEX_SIZE] =
@@ -99,6 +102,18 @@ AuditLog *audit_open(const char *path)
     log->count = 0;
     memset(log->head, 0, sizeof(log->head));
 
+    /* Refuse anything that is not a regular file. Without this, a caller who controls
+     * $VSH_AUDIT_LOG can point it at /dev/null (or any character device) and the sandbox runs with
+     * every audit write silently discarded -- "an unauditable sandbox is not a sandbox". A symlink
+     * or device here is treated as hostile. Non-existence is fine; we create it 0600 on first write. */
+    {
+        struct stat st;
+        if (lstat(path, &st) == 0 && !S_ISREG(st.st_mode)) {
+            free(log);
+            return NULL;
+        }
+    }
+
     /* Recover the chain head and entry count from any existing log. */
     FILE *fp = fopen(path, "r");
     if (fp) {
@@ -149,8 +164,12 @@ int audit_record(AuditLog *log, uid_t uid, const char *command, int result)
     hash_entry(prev_hex, ts, (unsigned long)uid, result, safe, digest);
     sha256_hex(digest, curr_hex);
 
-    FILE *fp = fopen(log->path, "a");
-    if (!fp) return -1;
+    /* Open O_CREAT|O_APPEND with mode 0600 so the command log is never world-readable, and
+     * O_NOFOLLOW so a pre-planted symlink at the path is not followed to clobber another file. */
+    int fd = open(log->path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0600);
+    if (fd < 0) return -1;
+    FILE *fp = fdopen(fd, "a");
+    if (!fp) { close(fd); return -1; }
 
     if (fprintf(fp, "%ld\t%ld\t%lu\t%d\t%s\t%s\n",
                 log->count + 1, ts, (unsigned long)uid, result,

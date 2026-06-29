@@ -1,0 +1,1 @@
+ech hello > out.txt 2>&1

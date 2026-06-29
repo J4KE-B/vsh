@@ -54,6 +54,18 @@ Shell *shell_init(int argc, char **argv) {
     shell->interactive = isatty(STDIN_FILENO);
     shell->running     = true;
 
+    /* Detect restricted mode HERE, before anything is sourced or executed.
+     * main() also sets this (and attaches the audit log) after we return, but that is too late:
+     * ~/.vshrc is sourced below, and if the flag were still false at that point the confined
+     * user's own rc would run UNRESTRICTED and UNAUDITED -- the classic rbash startup escape.
+     * Setting it now lets the rc block skip user startup files in restricted mode. */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--restricted") == 0) {
+            shell->restricted = true;
+            break;
+        }
+    }
+
     /* Subsystem creation */
     shell->parse_arena = arena_create();
     shell->env         = env_create();
@@ -88,8 +100,10 @@ Shell *shell_init(int argc, char **argv) {
         shell_setup_signals(shell);
     }
 
-    /* Source RC file (~/.vshrc) for interactive shells */
-    if (shell->interactive) {
+    /* Source RC file (~/.vshrc) for interactive shells -- but NEVER in restricted mode: the
+     * confined user typically owns their own ~/.vshrc, so sourcing it would let them run arbitrary
+     * unrestricted, unaudited commands at startup and escape the sandbox. */
+    if (shell->interactive && !shell->restricted) {
         const char *home = getenv("HOME");
         if (home) {
             char rc_path[PATH_MAX];

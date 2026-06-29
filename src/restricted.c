@@ -60,6 +60,15 @@ bool restricted_is_allowed(const char *name)
     return false;
 }
 
+const char *restricted_check_assignments(char *const *assignments, int nassign)
+{
+    for (int i = 0; i < nassign; i++) {
+        if (is_protected_var(assignments[i]))
+            return "modifying PATH/SHELL/ENV is not permitted";
+    }
+    return NULL;
+}
+
 const char *restricted_check(const char *name,
                              char *const *assignments, int nassign,
                              const Redirection *redirs)
@@ -80,10 +89,8 @@ const char *restricted_check(const char *name,
     }
 
     /* Reassigning the search path / startup env is an escape vector. */
-    for (int i = 0; i < nassign; i++) {
-        if (is_protected_var(assignments[i]))
-            return "modifying PATH/SHELL/ENV is not permitted";
-    }
+    const char *areason = restricted_check_assignments(assignments, nassign);
+    if (areason) return areason;
 
     /* Finally, the name itself must be explicitly allow-listed. */
     if (!restricted_is_allowed(name))

@@ -128,6 +128,17 @@ int executor_exec_command(Shell *shell, CommandNode *cmd)
 
     /* ---- Handle bare assignments (no command name) ---------------------- */
     if (cmd->argc == 0 && cmd->nassign > 0) {
+        /* Police protected-variable writes here too: a bare `PATH=/x` line never reaches the
+         * command check below, so without this the documented PATH/SHELL/ENV block would not fire
+         * for the assignment-only form. */
+        if (shell->restricted) {
+            const char *reason = restricted_check_assignments(cmd->assignments, cmd->nassign);
+            if (reason) {
+                fprintf(stderr, "vsh: restricted: %s\n", reason);
+                shell->last_status = 126;
+                return 126;
+            }
+        }
         for (int i = 0; i < cmd->nassign; i++) {
             char *key   = NULL;
             char *value = NULL;

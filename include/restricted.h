@@ -22,6 +22,11 @@
 /* True if `name` is on the restricted-mode allow-list. */
 bool restricted_is_allowed(const char *name);
 
+/* Check a set of variable assignments against the protected-variable policy.  Returns NULL if all
+ * are permitted, otherwise a static reason.  Exposed so a bare assignment line (no command name)
+ * can be policed the same way as inline `VAR=x cmd` assignments. */
+const char *restricted_check_assignments(char *const *assignments, int nassign);
+
 /* Evaluate a simple command against the restricted-mode policy.  Returns NULL
  * if the command is permitted, otherwise a static human-readable reason it was
  * denied.  `redirs` and the assignment array may be NULL/empty. */
