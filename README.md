@@ -41,6 +41,20 @@ A full-featured, memory-safe Linux shell written in C from scratch. No external 
 - Bounds-checked dynamic string buffer (`SafeString`)
 - Compiled with `-Wall -Wextra -Werror -Wshadow` and sanitizer support
 
+**Security**
+- **Restricted mode** (`vsh -r`): a deny-by-default sandbox modeled on `rbash` —
+  command allow-listing, no path-based command names, no output redirection, no
+  `PATH`/`SHELL`/`ENV`/`LD_*` reassignment, and `~/.vshrc` is not sourced when
+  restricted (closing the classic rc-file startup escape).
+- **Tamper-evident audit log**: every executed line is appended to a SHA-256
+  hash chain (`vsh --verify-audit` detects any edit, reorder, or deletion, and
+  names the first broken entry).
+- **From-scratch SHA-256** (`src/sha256.c`), FIPS 180-4, pinned against NIST
+  test vectors — no OpenSSL, keeping the "zero third-party libraries" promise.
+- **Fuzzed**: a libFuzzer harness drives the lexer → parser front end (never
+  the executor) under ASan/UBSan; millions of executions with zero crashes.
+- 267 passing assertions (`make test`), clean under `make fuzz` + sanitizers.
+
 ## Builtin Commands
 
 | Command | Description |

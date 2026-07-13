@@ -29,3 +29,6 @@ vgcore.*
 # OS
 .DS_Store
 Thumbs.db
+
+# Local-only interview-prep notes (not for the public repo)
+vsh-security-defense.md
