@@ -21,6 +21,7 @@
 #include "parser.h"
 #include "arena.h"
 #include "wildcard.h"
+#include "restricted.h"
 
 #include <unistd.h>
 #include <sys/wait.h>
@@ -254,6 +255,16 @@ static void exec_pipeline_child(Shell *shell, ASTNode *node)
 
         if (argc == 0)
             _exit(0);
+
+        /* Restricted-mode policy applies to every stage of a pipeline. */
+        if (shell->restricted) {
+            const char *reason = restricted_check(argv[0], cmd->assignments,
+                                                  cmd->nassign, cmd->redirs);
+            if (reason) {
+                fprintf(stderr, "vsh: restricted: %s: %s\n", argv[0], reason);
+                _exit(126);
+            }
+        }
 
         /*
          * Even builtins must run as subprocesses in a pipeline (they cannot

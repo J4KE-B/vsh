@@ -14,6 +14,7 @@
 typedef struct Arena Arena;
 typedef struct History History;
 typedef struct SafeString SafeString;
+typedef struct AuditLog AuditLog;
 
 /* ---- Environment Table -------------------------------------------------- */
 #define ENV_HASH_SIZE 256
@@ -109,6 +110,10 @@ typedef struct Shell {
     /* Script execution state */
     int          script_depth;  /* Nesting depth for source/scripts */
     bool         in_function;   /* Currently executing a function? */
+
+    /* Restricted execution mode (vsh -r) */
+    bool         restricted;    /* Command allow-listing enforced? */
+    AuditLog    *audit;         /* Tamper-evident audit log (NULL if off) */
 } Shell;
 
 /* Initialize the shell */

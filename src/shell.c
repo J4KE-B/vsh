@@ -18,6 +18,7 @@
 #include "executor.h"
 #include "vsh_readline.h"
 #include "safe_string.h"
+#include "audit.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,18 @@ Shell *shell_init(int argc, char **argv) {
     shell->interactive = isatty(STDIN_FILENO);
     shell->running     = true;
 
+    /* Detect restricted mode HERE, before anything is sourced or executed.
+     * main() also sets this (and attaches the audit log) after we return, but that is too late:
+     * ~/.vshrc is sourced below, and if the flag were still false at that point the confined
+     * user's own rc would run UNRESTRICTED and UNAUDITED -- the classic rbash startup escape.
+     * Setting it now lets the rc block skip user startup files in restricted mode. */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--restricted") == 0) {
+            shell->restricted = true;
+            break;
+        }
+    }
+
     /* Subsystem creation */
     shell->parse_arena = arena_create();
     shell->env         = env_create();
@@ -87,8 +100,10 @@ Shell *shell_init(int argc, char **argv) {
         shell_setup_signals(shell);
     }
 
-    /* Source RC file (~/.vshrc) for interactive shells */
-    if (shell->interactive) {
+    /* Source RC file (~/.vshrc) for interactive shells -- but NEVER in restricted mode: the
+     * confined user typically owns their own ~/.vshrc, so sourcing it would let them run arbitrary
+     * unrestricted, unaudited commands at startup and escape the sandbox. */
+    if (shell->interactive && !shell->restricted) {
         const char *home = getenv("HOME");
         if (home) {
             char rc_path[PATH_MAX];
@@ -136,6 +151,9 @@ void shell_destroy(Shell *shell) {
         /* Restore original terminal attributes */
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &shell->orig_termios);
     }
+
+    /* Close the tamper-evident audit log (restricted mode) */
+    if (shell->audit) audit_close(shell->audit);
 
     /* Subsystem destruction */
     if (shell->parse_arena)  arena_destroy(shell->parse_arena);
@@ -268,6 +286,14 @@ int shell_exec_line(Shell *shell, const char *line) {
 
     /* ---- Execute -------------------------------------------------------- */
     shell->last_status = executor_execute(shell, ast);
+
+    /* ---- Audit ---------------------------------------------------------- *
+     * Record the executed line (and its exit status) as a tamper-evident
+     * hash-chain entry.  Restricted-mode denials return non-zero and are
+     * logged here too, so the record of attempted escapes is preserved. */
+    if (shell->audit)
+        audit_record(shell->audit, getuid(), line, shell->last_status);
+
     return shell->last_status;
 }
 

@@ -5,6 +5,14 @@ build/
 vsh
 vsh_debug
 vsh_test
+vsh_fuzz
+vsh_fuzz_standalone
+
+# Fuzzer crash artifacts
+crash-*
+leak-*
+timeout-*
+oom-*
 
 # Editor files
 *.swp

@@ -19,8 +19,8 @@ SRCS     := $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/builtins/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS     := $(OBJS:.o=.d)
 
-# Test files
-TEST_SRCS := $(wildcard tests/*.c)
+# Test files (the fuzz harness is built separately via `make fuzz`)
+TEST_SRCS := $(filter-out tests/fuzz_parser.c,$(wildcard tests/*.c))
 TEST_OBJS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%.o,$(TEST_SRCS))
 # Objects excluding main.o for test linking
 LIB_OBJS  := $(filter-out $(BUILD_DIR)/main.o,$(OBJS))
@@ -31,7 +31,15 @@ TARGET   := vsh
 # Targets
 # ============================================================================
 
-.PHONY: all release debug sanitize test clean install
+.PHONY: all release debug sanitize test fuzz fuzz-standalone clean install
+
+# Fuzzing (libFuzzer + ASan/UBSan). Only the front end (lexer -> parser) is
+# linked in -- fuzzed bytes are never executed.
+FUZZ_CC   := clang
+FUZZ_SRCS := $(SRC_DIR)/lexer.c $(SRC_DIR)/parser.c $(SRC_DIR)/arena.c \
+             $(SRC_DIR)/safe_string.c
+FUZZ_FLAGS:= -std=c11 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -I./include \
+             -g -O1 -fno-omit-frame-pointer
 
 all: release
 
@@ -72,8 +80,23 @@ $(BUILD_DIR)/tests/%.o: tests/%.c
 	@echo "[CC] $<"
 	@$(CC) $(CFLAGS) -I./tests -MMD -MP -c $< -o $@
 
+# Coverage-guided fuzzer (requires clang with libFuzzer support)
+fuzz:
+	@echo "[FUZZ] Building vsh_fuzz (libFuzzer + ASan/UBSan)"
+	@$(FUZZ_CC) $(FUZZ_FLAGS) -fsanitize=fuzzer,address,undefined \
+	    $(FUZZ_SRCS) tests/fuzz_parser.c -o vsh_fuzz
+	@echo "[OK] Built vsh_fuzz -- run: ./vsh_fuzz -max_total_time=90 tests/fuzz_corpus"
+
+# Portable fallback: a plain ASan/UBSan driver that reads a corpus / stdin,
+# for toolchains without libFuzzer. Drive it with random inputs in a loop.
+fuzz-standalone:
+	@echo "[FUZZ] Building vsh_fuzz_standalone (ASan/UBSan, no libFuzzer)"
+	@$(FUZZ_CC) $(FUZZ_FLAGS) -DFUZZ_STANDALONE -fsanitize=address,undefined \
+	    $(FUZZ_SRCS) tests/fuzz_parser.c -o vsh_fuzz_standalone
+	@echo "[OK] Built vsh_fuzz_standalone"
+
 clean:
-	@rm -rf $(BUILD_DIR) $(TARGET) vsh_debug vsh_test
+	@rm -rf $(BUILD_DIR) $(TARGET) vsh_debug vsh_test vsh_fuzz vsh_fuzz_standalone
 	@echo "[CLEAN] Done"
 
 install: release
